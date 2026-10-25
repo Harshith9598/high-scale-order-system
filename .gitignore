@@ -1,0 +1,61 @@
+# Java / Maven
+*.class
+target/
+!.mvn/wrapper/maven-wrapper.jar
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.versionsBackup
+pom.xml.next
+release.properties
+dependency-reduced-pom.xml
+buildNumber.properties
+.mvn/timing.properties
+
+# Local Maven repo / build artefacts (never commit)
+.m2/
+*.jar
+*.war
+*.ear
+!**/src/main/**/target/
+!**/src/test/**/target/
+
+# IDE
+.idea/
+*.iws
+*.iml
+*.ipr
+.vscode/
+.settings/
+.project
+.classpath
+.factorypath
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Environment / secrets - NEVER commit real secrets
+.env
+.env.local
+.env.*.local
+application-local.yml
+application-prod.yml
+
+# Testcontainers / coverage
+.testcontainers.properties
+jacoco.exec
+coverage/
+
+# Temp / local preview artefacts
+tmp/
+temp/
+live-index.html
+*.bundle
+high-scale-order-system.zip

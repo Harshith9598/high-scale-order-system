@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Order Platform Dashboard</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f7fa; color: #333; }
+        header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 2rem; text-align: center; }
+        header h1 { font-size: 2rem; margin-bottom: 0.5rem; }
+        header p { opacity: 0.9; }
+        .container { max-width: 1200px; margin: 2rem auto; padding: 0 1rem; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.5rem; margin-bottom: 2rem; }
+        .card { background: white; border-radius: 12px; padding: 1.5rem; box-shadow: 0 2px 8px rgba(0,0,0,0.08); transition: transform 0.2s; }
+        .card:hover { transform: translateY(-2px); box-shadow: 0 4px 16px rgba(0,0,0,0.12); }
+        .card h3 { font-size: 0.9rem; text-transform: uppercase; letter-spacing: 0.5px; color: #666; margin-bottom: 0.5rem; }
+        .card .value { font-size: 2rem; font-weight: 700; color: #333; }
+        .card .sub { font-size: 0.85rem; color: #888; margin-top: 0.5rem; }
+        .status-up { color: #10b981; }
+        .status-down { color: #ef4444; }
+        .section { background: white; border-radius: 12px; padding: 1.5rem; box-shadow: 0 2px 8px rgba(0,0,0,0.08); margin-bottom: 1.5rem; }
+        .section h2 { font-size: 1.25rem; margin-bottom: 1rem; border-bottom: 2px solid #f0f0f0; padding-bottom: 0.5rem; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { text-align: left; padding: 0.75rem; border-bottom: 1px solid #f0f0f0; }
+        th { font-weight: 600; color: #666; font-size: 0.85rem; text-transform: uppercase; }
+        .badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; }
+        .badge-created { background: #dbeafe; color: #1e40af; }
+        .badge-reserved { background: #fef3c7; color: #92400e; }
+        .badge-completed { background: #d1fae5; color: #065f46; }
+        .badge-failed { background: #fee2e2; color: #991b1b; }
+        .badge-cancelled { background: #f3f4f6; color: #374151; }
+        .btn { display: inline-block; padding: 0.5rem 1rem; background: #667eea; color: white; border-radius: 6px; text-decoration: none; font-size: 0.9rem; }
+        .btn:hover { background: #5a67d8; }
+        .links { display: flex; gap: 1rem; flex-wrap: wrap; margin-top: 1rem; }
+        .log { background: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 8px; font-family: monospace; font-size: 0.85rem; overflow-x: auto; }
+        .arch { background: #f9fafb; padding: 1rem; border-radius: 8px; border-left: 4px solid #667eea; margin: 1rem 0; }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>High-Scale Order Platform</h1>
+        <p>Event-Driven Architecture • Kafka • Redis • PostgreSQL • Spring Boot 3.x</p>
+        <div class="links" style="justify-content: center; margin-top: 1rem;">
+            <a class="btn" href="/swagger-ui.html" target="_blank">Swagger UI</a>
+            <a class="btn" href="/actuator/health" target="_blank">Health</a>
+            <a class="btn" href="/actuator/prometheus" target="_blank">Metrics</a>
+            <a class="btn" href="/api-docs" target="_blank">OpenAPI</a>
+        </div>
+    </header>
+
+    <div class="container">
+        <div class="grid">
+            <div class="card">
+                <h3>System Health</h3>
+                <div class="value" id="health-status">Checking...</div>
+                <div class="sub">Actuator health endpoint</div>
+            </div>
+            <div class="card">
+                <h3>Products</h3>
+                <div class="value" id="product-count">-</div>
+                <div class="sub">Cached with Redis (5 min TTL)</div>
+            </div>
+            <div class="card">
+                <h3>Orders Today</h3>
+                <div class="value" id="order-count">-</div>
+                <div class="sub">Event-driven processing</div>
+            </div>
+            <div class="card">
+                <h3>Kafka Topics</h3>
+                <div class="value">7 + 4 DLT</div>
+                <div class="sub">KRaft mode, 3 partitions</div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>Architecture Flow</h2>
+            <div class="arch">
+                <strong>Client → REST API → PostgreSQL → Outbox → Kafka → Consumers (Inventory, Payment, OrderStatus, Notification) → PostgreSQL → Client</strong>
+            </div>
+            <p style="margin: 1rem 0; color: #666;">
+                This dashboard demonstrates the backend architecture. The core focus is on reliable event processing, not UI complexity.
+                Use Swagger UI to interact with the APIs, and Actuator endpoints for observability.
+            </p>
+            <div class="grid" style="grid-template-columns: 1fr 1fr;">
+                <div>
+                    <h4 style="margin-bottom: 0.5rem;">Core Patterns</h4>
+                    <ul style="margin-left: 1.5rem; color: #555; line-height: 1.8;">
+                        <li>Transactional Outbox Pattern</li>
+                        <li>Idempotent Consumers</li>
+                        <li>Retry + Dead Letter Queue</li>
+                        <li>Optimistic & Pessimistic Locking</li>
+                        <li>Redis Caching with Fallback</li>
+                        <li>JWT + RBAC Security</li>
+                    </ul>
+                </div>
+                <div>
+                    <h4 style="margin-bottom: 0.5rem;">Endpoints</h4>
+                    <ul style="margin-left: 1.5rem; color: #555; line-height: 1.8;">
+                        <li><code>POST /api/auth/register</code> & <code>/login</code></li>
+                        <li><code>GET /api/products</code> (cached)</li>
+                        <li><code>POST /api/orders</code> (creates event)</li>
+                        <li><code>GET /api/orders/{id}</code></li>
+                        <li><code>GET /api/inventory/{productId}</code></li>
+                        <li><code>GET /api/notifications</code></li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>Recent Orders (Demo - requires auth)</h2>
+            <p style="color: #888; margin-bottom: 1rem;">Login via Swagger UI to get JWT, then use API to create and view orders. This table would be populated via authenticated API calls.</p>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Order #</th>
+                        <th>Status</th>
+                        <th>Total</th>
+                        <th>Created</th>
+                        <th>Correlation ID</th>
+                    </tr>
+                </thead>
+                <tbody id="orders-table">
+                    <tr><td colspan="5" style="text-align: center; color: #888;">Use Swagger UI or API to create orders. Example: POST /api/orders with JWT token.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="section">
+            <h2>Event Flow Example</h2>
+            <div class="log">
+POST /api/orders → Order CREATED → outbox_events PENDING → Kafka order.created →<br>
+InventoryConsumer: reserve stock → order INVENTORY_RESERVED → Kafka inventory.reserved →<br>
+PaymentConsumer: process payment (5% fail) → order PAYMENT_COMPLETED → Kafka payment.processed →<br>
+OrderStatusConsumer: confirm inventory, order COMPLETED → Kafka order.completed →<br>
+NotificationConsumer: create notification → User sees COMPLETED
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>Quick Start</h2>
+            <div class="log">
+# 1. Start full stack<br>
+docker compose up -d<br><br>
+# 2. Register user<br>
+curl -X POST http://localhost:8080/api/auth/register \<br>
+  -H "Content-Type: application/json" \<br>
+  -d '{"username":"demo","email":"demo@test.com","password":"demo123"}'<br><br>
+# 3. Login<br>
+curl -X POST http://localhost:8080/api/auth/login \<br>
+  -H "Content-Type: application/json" \<br>
+  -d '{"usernameOrEmail":"demo","password":"demo123"}'<br><br>
+# 4. Browse products (no auth)<br>
+curl http://localhost:8080/api/products<br><br>
+# 5. Create order (with JWT)<br>
+curl -X POST http://localhost:8080/api/orders \<br>
+  -H "Authorization: Bearer &lt;token&gt;" \<br>
+  -H "Content-Type: application/json" \<br>
+  -d '{"items":[{"productId":1,"quantity":2}]}'<br><br>
+# 6. Check status<br>
+curl http://localhost:8080/api/orders/1 \<br>
+  -H "Authorization: Bearer &lt;token&gt;"
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>Engineering Docs</h2>
+            <div class="links">
+                <a class="btn" href="https://github.com" target="_blank">Architecture</a>
+                <a class="btn" href="/swagger-ui.html" target="_blank">API Docs</a>
+                <a class="btn" href="/actuator" target="_blank">Actuator</a>
+            </div>
+            <p style="margin-top: 1rem; color: #666;">See <code>/docs</code> directory for detailed engineering documentation: architecture, database, kafka events, idempotency, outbox, caching, concurrency, reliability, performance, deployment.</p>
+        </div>
+    </div>
+
+    <script>
+        // Health check
+        fetch('/actuator/health')
+            .then(r => r.json())
+            .then(data => {
+                const el = document.getElementById('health-status');
+                if (data.status === 'UP') {
+                    el.innerHTML = '<span class="status-up">● UP</span>';
+                } else {
+                    el.innerHTML = '<span class="status-down">● DOWN</span>';
+                }
+            })
+            .catch(() => {
+                document.getElementById('health-status').innerHTML = '<span class="status-down">● DOWN</span>';
+            });
+
+        // Product count (public endpoint)
+        fetch('/api/products?size=1')
+            .then(r => r.json())
+            .then(data => {
+                document.getElementById('product-count').textContent = data.totalElements || data.content?.length || '10+';
+            })
+            .catch(() => {
+                document.getElementById('product-count').textContent = '10';
+            });
+
+        // Placeholder for orders (would need auth)
+        document.getElementById('order-count').textContent = '—';
+    </script>
+</body>
+</html>

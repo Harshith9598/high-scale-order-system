@@ -1,0 +1,14 @@
+target/
+.m2/
+.git/
+.gitignore
+*.md
+docs/
+performance-tests/
+e2e-test.sh
+.dockerignore
+Dockerfile
+docker-compose.yml
+.idea/
+.vscode/
+*.log
