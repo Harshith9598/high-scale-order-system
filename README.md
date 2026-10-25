@@ -26,10 +26,10 @@ This system implements a complete e-commerce order processing flow with event-dr
 
 **Key Features:**
 - Transactional Outbox Pattern for reliable event publishing
-- Idempotent consumers (exactly-once processing semantics)
-- Retry with exponential backoff + Dead Letter Queue
+- At-least-once delivery with idempotent consumers ⇒ effectively-once *business effects* (see "Delivery guarantees" in `docs/engineering-audit.md`)
+- Retry with exponential backoff (1s → 2s → 4s, max 3) + dead-letter topics (`<topic>.DLT`) and a `failed_events` inspection table
 - Redis caching with fallback
-- Optimistic & pessimistic locking for concurrency
+- Concurrency-safe stock via atomic conditional `UPDATE` (+ `@Version` on entities); no lock is held across requests
 - JWT authentication with RBAC
 - Comprehensive observability (Actuator, Prometheus, correlation IDs)
 
@@ -365,9 +365,9 @@ See `docs/outbox-pattern.md`.
 
 ## Retry & Dead Letter Queue
 
-**Retry:** `FixedBackOff(2s, 3 attempts)` via `DefaultErrorHandler`.
+**Retry:** `ExponentialBackOffWithMaxRetries(3)` (1s → 2s → 4s) via the `DefaultErrorHandler` wired in `KafkaConfig` (`KafkaRetryConfig`). Malformed records (deserialization errors, events without an `eventId`) are classified non-retryable.
 
-**DLQ:** After 3 failures, event saved to `failed_events` table with exception details.
+**DLQ:** After retries are exhausted the record is published to `<topic>.DLT` with `kafka_dlt-*` exception headers *and* persisted to `failed_events` with the root-cause message.
 
 **Inspection:** `GET /api/failed-events` (ADMIN).
 
@@ -378,10 +378,11 @@ See `docs/reliability.md`.
 **Problem:** Two users buying last item → overselling.
 
 **Solution layers:**
-1. **Atomic UPDATE:** `UPDATE inventory SET available = available - qty WHERE available >= qty` - returns 0 if insufficient
-2. **Pessimistic locking:** `SELECT ... FOR UPDATE` when needed
-3. **Optimistic locking:** `@Version` field
-4. **Idempotency:** Prevents double-processing
+1. **Atomic UPDATE (the hot path):** `UPDATE inventory SET available = available - qty WHERE available >= qty` - returns 0 if insufficient (`InventoryRepository.reserveInventory`); DB `CHECK (quantity >= 0)` constraints are the backstop
+2. **Optimistic locking:** `@Version` on mutable entities for lost-update protection outside the atomic updates
+3. **Idempotency:** Prevents double-processing of redelivered events
+
+Insufficient stock is a normal outcome (`reserveInventory` returns `false`, the order goes to `INVENTORY_FAILED` → `FAILED`) — it is *not* an exception, so it never poisons the consumer transaction.
 
 **Test:** `ConcurrentOrderTest` - 10 threads compete for 5 items, only 5 succeed.
 
@@ -483,11 +484,17 @@ GET /api/failed-events/order/{orderId}
 
 ## Testing
 
-### Unit Tests
+### Unit Tests (38, no Docker needed)
 
 - `OrderStatusTest` - state transitions
-- `ProductServiceTest` - service logic
-- `IdempotencyServiceTest` - idempotency
+- `OrderServiceTest` - order + outbox in one call, duplicate-line merging, ownership (403), invalid transitions
+- `InventoryServiceTest` - reserve/release/confirm semantics incl. insufficient stock
+- `IdempotencyServiceTest` - per-consumer dedupe, fan-out, missing `eventId`, race handling
+- `InventoryConsumerTest` - duplicate delivery is a no-op; partial failure compensates only what was reserved
+- `OutboxPublisherTest` - typed publish, retry backoff, `DEAD` after max retries
+- `PaymentOwnershipTest` - payment IDOR regression
+- `JwtTokenProviderTest` - weak/blank secrets fail fast; Base64 and raw secrets
+- `ProductServiceTest`, `RequestValidationTest` - service logic, Bean Validation
 
 ### Integration Tests
 
@@ -503,18 +510,14 @@ GET /api/failed-events/order/{orderId}
 ### Running Tests
 
 ```bash
-# Unit tests only (fast)
-mvn test -Dtest=OrderStatusTest,ProductServiceTest,IdempotencyServiceTest
+# Unit tests only (fast, no Docker)
+./mvnw test -Dtest='!OrderIntegrationTest,!ConcurrentOrderTest'
 
-# All tests (requires Docker for Testcontainers)
-mvn test
-
-# Specific integration test
-mvn test -Dtest=OrderIntegrationTest
-
-# Concurrency test
-mvn test -Dtest=ConcurrentOrderTest
+# Integration + concurrency (requires Docker for Testcontainers)
+./mvnw test -Dtest=OrderIntegrationTest,ConcurrentOrderTest
 ```
+
+CI (`.github/workflows/ci.yml`) runs both stages and builds the Docker image.
 
 ## Performance Testing
 
@@ -541,7 +544,12 @@ chmod +x run-perf-test.sh
 
 **Benchmark Results:**
 
-> **NOTE:** Fill after running tests. Do NOT invent numbers.
+> **NOT YET MEASURED under load.** No load test has been executed for this
+> project; do not quote throughput numbers for it. The reproducible plan is in
+> `docs/load-test-plan.md`. The only measured timings so far come from the
+> 2026-10-25 correctness smoke run (2 GB sandbox, single instance, *sequential*
+> requests): `GET /api/products?size=5` ×30 → p50 28 ms, p95 63 ms. That is a
+> smoke observation, not a benchmark.
 
 ```
 Environment:
@@ -612,7 +620,7 @@ docker compose down -v  # also remove volumes
 | REDIS_HOST | localhost | Redis host |
 | REDIS_PORT | 6379 | Redis port |
 | KAFKA_BOOTSTRAP_SERVERS | localhost:9092 | Kafka brokers |
-| JWT_SECRET | dev secret | Base64 JWT secret |
+| JWT_SECRET | **required, no default** (app refuses to start without it; `docker-compose.yml` supplies a labelled dev-only value) | ≥32-byte HMAC secret, Base64 or raw — generate with `openssl rand -base64 48` |
 | JWT_EXPIRATION_MS | 86400000 | Token expiry (24h) |
 
 See `.env.example`.
@@ -628,13 +636,13 @@ export DATABASE_USERNAME=orderuser
 export DATABASE_PASSWORD=orderpass
 export REDIS_HOST=localhost
 export KAFKA_BOOTSTRAP_SERVERS=localhost:9092
-export JWT_SECRET=your-base64-secret
+export JWT_SECRET=$(openssl rand -base64 48)
 
 # Run
-mvn spring-boot:run
+./mvnw spring-boot:run
 
 # Or build and run jar
-mvn clean package -DskipTests
+./mvnw clean package -DskipTests
 java -jar target/order-platform-1.0.0.jar
 ```
 
@@ -676,20 +684,14 @@ See `docs/deployment.md`.
 
 - `/actuator/health` - overall health
 - `/actuator/info` - app info
-- `/actuator/metrics` - metrics
-- `/actuator/prometheus` - Prometheus format
-- `/actuator/caches` - cache stats
+- `/actuator/health/liveness`, `/actuator/health/readiness` - k8s probes (public)
+- `/actuator/metrics`, `/actuator/prometheus` - **ADMIN only**
+- `env`/`beans` are intentionally *not* exposed (they leak configuration)
 
 ### Metrics
 
-- `orders.created.total`
-- `orders.completed.total`
-- `orders.failed.total`
-- `kafka.events.published.total`
-- `kafka.events.failed.total`
-- `orders.processing.time`
-- `http.server.requests` (auto)
-- `cache.hits`, `cache.misses`
+- `orders.created.total`, `orders.completed.total`, `orders.failed.total` (`metrics/OrderMetrics`)
+- Framework metrics from Micrometer auto-configuration: `http.server.requests`, JVM, Hikari, Kafka client, cache
 
 ### Logging
 
@@ -715,7 +717,10 @@ See `docs/` for detailed reasoning.
 ## Trade-offs
 
 - **Eventual consistency:** Order status eventually COMPLETED, not immediate. Acceptable for scalability.
-- **At-least-once delivery:** Consumers must be idempotent. We implemented.
+- **At-least-once delivery:** Consumers must be idempotent. We implemented per-consumer idempotency records committed in the same DB transaction as the business effect — effectively-once effects, *not* end-to-end exactly-once.
+- **Outbox latency:** Events flow in polling hops (5s interval), so an order takes ~15–20s to reach `COMPLETED` locally. CDC (Debezium) or a shorter interval cuts this; polling keeps the demo dependency-free.
+- **Single-instance outbox publisher:** Two app instances can publish the same row twice (same `eventId`, deduped downstream). Claim rows with `SELECT … FOR UPDATE SKIP LOCKED` before scaling out.
+- **In-memory Kafka retry** blocks its partition during backoff (preserves ordering; a retry-topics topology avoids head-of-line blocking).
 - **Cache invalidation blunt:** `allEntries=true` for product list may cause stampede. Could improve with versioning.
 - **Single DB:** Currently monolithic DB, could split per service in microservices.
 - **No saga:** Simple flow, no compensating transactions beyond inventory release. Saga would be needed for more complex flows.
@@ -734,7 +739,32 @@ See `docs/` for detailed reasoning.
 - [ ] Frontend dashboard (React)
 - [ ] Chaos testing
 - [ ] K8s manifests + Helm chart
-- [ ] CI/CD pipeline
+- [x] CI pipeline (unit + Testcontainers + Docker build)
+- [ ] CD / release automation
+
+## Troubleshooting
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| `JWT_SECRET is not set` / `Could not resolve placeholder 'JWT_SECRET'` | Running the jar/`spring-boot:run` without the env var | `export JWT_SECRET=$(openssl rand -base64 48)` |
+| App container can't reach Kafka (`Connection to node -1 could not be established`) | Advertised listeners: in-container clients must use `kafka:29092`, host tools `localhost:9092` | Already configured in `docker-compose.yml`; don't collapse them into one listener |
+| Order stays `CREATED` | Outbox publisher logs errors, or Kafka is down | `select * from outbox_events where status != 'COMPLETED'`; check `docker compose logs app | grep Outbox` |
+| Event in `failed_events` / on a `.DLT` topic | Poison/malformed record or repeated business failure | `GET /api/failed-events` (ADMIN) for the root cause; fix and republish the payload manually |
+| `docker compose` app unhealthy | Postgres/Kafka still starting | Health checks gate startup; `docker compose ps` and wait ~60s on first run |
+| Testcontainers tests fail locally | Docker daemon not running | Start Docker, or run only `./mvnw test -Dtest='!OrderIntegrationTest,!ConcurrentOrderTest'` |
+
+## Verification status (2026-10-25 audit)
+
+Full report: `docs/engineering-audit.md`. Verified by actually running the stack
+(PostgreSQL + Kafka KRaft + Redis + the packaged jar): happy-path order to
+`COMPLETED` with stock 100→98; oversell attempt → `FAILED` with stock untouched;
+duplicate event republish deduped (no double reservation/payment); malformed
+event → `order.created.DLT` + `failed_events`; other-user order/payment reads →
+`403`; Flyway V1→V2 clean on an empty database. **Not** yet executed here:
+the Testcontainers suites and `docker build` (no Docker daemon in the audit
+sandbox) — both are wired into CI.
+
+Interview preparation: `docs/interview-guide.md`.
 
 ## Project Structure
 

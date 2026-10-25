@@ -5,7 +5,7 @@ import com.ordersystem.entity.Payment;
 import com.ordersystem.enums.OrderStatus;
 import com.ordersystem.kafka.event.InventoryReservedEvent;
 import com.ordersystem.kafka.event.PaymentProcessedEvent;
-import com.ordersystem.kafka.producer.EventProducer;
+import com.ordersystem.outbox.OutboxService;
 import com.ordersystem.repository.OrderRepository;
 import com.ordersystem.service.IdempotencyService;
 import com.ordersystem.service.InventoryService;
@@ -14,7 +14,6 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.kafka.annotation.KafkaListener;
-import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.kafka.support.KafkaHeaders;
 import org.springframework.messaging.handler.annotation.Header;
 import org.springframework.messaging.handler.annotation.Payload;
@@ -33,7 +32,7 @@ public class PaymentConsumer {
     private final OrderRepository orderRepository;
     private final InventoryService inventoryService;
     private final IdempotencyService idempotencyService;
-    private final EventProducer eventProducer;
+    private final OutboxService outboxService;
 
     @Value("${app.kafka.topics.payment-processed}")
     private String paymentProcessedTopic;
@@ -48,22 +47,19 @@ public class PaymentConsumer {
     public void handleInventoryReserved(@Payload InventoryReservedEvent event,
                                         @Header(KafkaHeaders.RECEIVED_TOPIC) String topic,
                                         @Header(KafkaHeaders.RECEIVED_PARTITION) int partition,
-                                        @Header(KafkaHeaders.OFFSET) long offset,
-                                        Acknowledgment ack) {
-        String eventId = event.getEventId() != null ? event.getEventId() : UUID.randomUUID().toString();
+                                        @Header(KafkaHeaders.OFFSET) long offset) {
+        String eventId = event.getEventId();
         log.info("Received InventoryReservedEvent: eventId={} orderId={} success={} topic={} partition={} offset={}",
                 eventId, event.getOrderId(), event.isSuccess(), topic, partition, offset);
 
         if (!event.isSuccess()) {
             log.info("Skipping payment for failed inventory reservation: orderId={}", event.getOrderId());
-            ack.acknowledge();
             return;
         }
 
         try {
             if (!idempotencyService.tryMarkProcessed(eventId, CONSUMER_NAME, event.getOrderId().toString())) {
                 log.info("Skipping duplicate payment event: eventId={}", eventId);
-                ack.acknowledge();
                 return;
             }
 
@@ -114,10 +110,13 @@ public class PaymentConsumer {
                     .build();
 
             String targetTopic = paymentSuccess ? paymentProcessedTopic : paymentFailedTopic;
-            eventProducer.publishSync(targetTopic, event.getOrderId().toString(), paymentEvent);
+            // Via the outbox, in this transaction: the payment row, the order
+            // status, the idempotency claim and this event commit atomically.
+            outboxService.saveEvent("Order", event.getOrderId().toString(),
+                    paymentSuccess ? "PaymentProcessed" : "PaymentFailed",
+                    paymentEvent, targetTopic, event.getCorrelationId());
 
             log.info("Payment {} for order {}", paymentSuccess ? "succeeded" : "failed", event.getOrderNumber());
-            ack.acknowledge();
 
         } catch (Exception e) {
             log.error("Error processing payment for order {}: {}", event.getOrderId(), e.getMessage(), e);

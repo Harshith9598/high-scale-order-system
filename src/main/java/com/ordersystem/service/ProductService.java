@@ -29,7 +29,7 @@ public class ProductService {
     private final ProductMapper productMapper;
 
     @Transactional(readOnly = true)
-    @Cacheable(value = "products", key = "#category + '-' + #search + '-' + #pageable.pageNumber + '-' + #pageable.pageSize")
+    @Cacheable(value = "products", key = "#category + '-' + #search + '-' + #pageable.pageNumber + '-' + #pageable.pageSize + '-' + #pageable.sort")
     public Page<ProductDto> getProducts(String category, String search, Pageable pageable) {
         Page<Product> products = productRepository.findByFilters(category, search, pageable);
         return products.map(product -> {

@@ -4,7 +4,8 @@ import com.ordersystem.entity.Order;
 import com.ordersystem.enums.OrderStatus;
 import com.ordersystem.kafka.event.OrderCompletedEvent;
 import com.ordersystem.kafka.event.PaymentProcessedEvent;
-import com.ordersystem.kafka.producer.EventProducer;
+import com.ordersystem.metrics.OrderMetrics;
+import com.ordersystem.outbox.OutboxService;
 import com.ordersystem.repository.OrderRepository;
 import com.ordersystem.service.IdempotencyService;
 import com.ordersystem.service.InventoryService;
@@ -12,7 +13,6 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.kafka.annotation.KafkaListener;
-import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.kafka.support.KafkaHeaders;
 import org.springframework.messaging.handler.annotation.Header;
 import org.springframework.messaging.handler.annotation.Payload;
@@ -30,7 +30,8 @@ public class OrderStatusConsumer {
     private final OrderRepository orderRepository;
     private final InventoryService inventoryService;
     private final IdempotencyService idempotencyService;
-    private final EventProducer eventProducer;
+    private final OutboxService outboxService;
+    private final OrderMetrics orderMetrics;
 
     @Value("${app.kafka.topics.order-completed}")
     private String orderCompletedTopic;
@@ -43,16 +44,14 @@ public class OrderStatusConsumer {
     @KafkaListener(topics = {"${app.kafka.topics.payment-processed}", "${app.kafka.topics.payment-failed}"}, groupId = "order-status-group", containerFactory = "kafkaListenerContainerFactory")
     @Transactional
     public void handlePaymentProcessed(@Payload PaymentProcessedEvent event,
-                                       @Header(KafkaHeaders.RECEIVED_TOPIC) String topic,
-                                       Acknowledgment ack) {
-        String eventId = event.getEventId() != null ? event.getEventId() : UUID.randomUUID().toString();
+                                       @Header(KafkaHeaders.RECEIVED_TOPIC) String topic) {
+        String eventId = event.getEventId();
         log.info("OrderStatusConsumer received event: eventId={} orderId={} success={} topic={}",
                 eventId, event.getOrderId(), event.isSuccess(), topic);
 
         try {
             if (!idempotencyService.tryMarkProcessed(eventId, CONSUMER_NAME, event.getOrderId().toString())) {
                 log.info("Skipping duplicate order status event: eventId={}", eventId);
-                ack.acknowledge();
                 return;
             }
 
@@ -63,16 +62,19 @@ public class OrderStatusConsumer {
                 // Confirm inventory reservation (deduct reserved)
                 var orderWithItems = orderRepository.findByIdWithItems(order.getId()).orElse(order);
                 for (var item : orderWithItems.getItems()) {
-                    try {
-                        inventoryService.confirmReservation(item.getProduct().getId(), item.getQuantity());
-                    } catch (Exception ex) {
-                        log.warn("Failed to confirm inventory for product {}: {}", item.getProduct().getId(), ex.getMessage());
+                    // Do NOT swallow failures: completing the order with an
+                    // un-confirmed reservation leaks reserved stock forever.
+                    // Throwing rolls back and lets the error handler retry.
+                    if (!inventoryService.confirmReservation(item.getProduct().getId(), item.getQuantity())) {
+                        throw new IllegalStateException("No reservation to confirm for product "
+                                + item.getProduct().getId() + " on order " + order.getOrderNumber());
                     }
                 }
 
                 if (order.getStatus().canTransitionTo(OrderStatus.COMPLETED)) {
                     order.setStatus(OrderStatus.COMPLETED);
                     orderRepository.save(order);
+                    orderMetrics.orderCompleted();
                     log.info("Order completed: {}", order.getOrderNumber());
 
                     // Publish order completed event
@@ -86,17 +88,18 @@ public class OrderStatusConsumer {
                             .userId(event.getUserId())
                             .build();
 
-                    eventProducer.publishSync(orderCompletedTopic, order.getId().toString(), completedEvent);
+outboxService.saveEvent("Order", order.getId().toString(), "OrderCompleted",
+                            completedEvent, orderCompletedTopic, event.getCorrelationId());
                 }
             } else {
                 if (order.getStatus().canTransitionTo(OrderStatus.FAILED)) {
                     order.setStatus(OrderStatus.FAILED);
                     orderRepository.save(order);
+                    orderMetrics.orderFailed();
                     log.info("Order failed due to payment failure: {}", order.getOrderNumber());
                 }
             }
 
-            ack.acknowledge();
         } catch (Exception e) {
             log.error("Error in order status consumer for order {}: {}", event.getOrderId(), e.getMessage(), e);
             throw new RuntimeException("Order status processing failed", e);
@@ -105,14 +108,12 @@ public class OrderStatusConsumer {
 
     @KafkaListener(topics = "${app.kafka.topics.inventory-failed}", groupId = "order-status-group", containerFactory = "kafkaListenerContainerFactory")
     @Transactional
-    public void handleInventoryFailed(@Payload com.ordersystem.kafka.event.InventoryReservedEvent event,
-                                      Acknowledgment ack) {
-        String eventId = event.getEventId() != null ? event.getEventId() : UUID.randomUUID().toString();
+    public void handleInventoryFailed(@Payload com.ordersystem.kafka.event.InventoryReservedEvent event) {
+        String eventId = event.getEventId();
         log.info("Received InventoryFailedEvent: eventId={} orderId={}", eventId, event.getOrderId());
 
         try {
             if (!idempotencyService.tryMarkProcessed(eventId, CONSUMER_NAME + "-inventory-failed", event.getOrderId().toString())) {
-                ack.acknowledge();
                 return;
             }
 
@@ -120,10 +121,10 @@ public class OrderStatusConsumer {
             if (order != null && order.getStatus().canTransitionTo(OrderStatus.FAILED)) {
                 order.setStatus(OrderStatus.FAILED);
                 orderRepository.save(order);
+                orderMetrics.orderFailed();
                 log.info("Order marked as FAILED due to inventory failure: {}", order.getOrderNumber());
             }
 
-            ack.acknowledge();
         } catch (Exception e) {
             log.error("Error handling inventory failed for order {}: {}", event.getOrderId(), e.getMessage(), e);
             throw new RuntimeException(e);

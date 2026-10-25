@@ -21,25 +21,24 @@ public class JwtTokenProvider {
 
     public JwtTokenProvider(@Value("${app.jwt.secret}") String secret,
                             @Value("${app.jwt.expiration-ms}") long expirationMs) {
-        byte[] keyBytes = Decoders.BASE64.decode(secret);
-        // Ensure key is at least 256 bits for HS256; if not, use raw bytes hashed? JJWT will validate
-        // For simplicity, if secret length < 32, pad via Keys.hmacShaKeyFor will handle minimum length check
-        // We attempt to use the secret directly if it's not base64; fallback
-        SecretKey generatedKey;
-        try {
-            generatedKey = Keys.hmacShaKeyFor(keyBytes);
-        } catch (Exception e) {
-            // Fallback: use secret bytes directly (for dev)
-            log.warn("JWT secret not base64 or too short, using raw bytes (dev only)");
-            byte[] raw = secret.getBytes();
-            if (raw.length < 32) {
-                byte[] padded = new byte[32];
-                System.arraycopy(raw, 0, padded, 0, raw.length);
-                raw = padded;
-            }
-            generatedKey = Keys.hmacShaKeyFor(raw);
+        if (secret == null || secret.isBlank()) {
+            throw new IllegalStateException(
+                    "JWT_SECRET is not set. Generate one with: openssl rand -base64 48");
         }
-        this.key = generatedKey;
+        byte[] keyBytes;
+        try {
+            keyBytes = Decoders.BASE64.decode(secret);
+        } catch (Exception notBase64) {
+            // Accept a raw (non-Base64) secret, but apply the same length rule.
+            keyBytes = secret.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        }
+        if (keyBytes.length < 32) {
+            // Fail fast instead of silently padding a weak secret to look valid.
+            throw new IllegalStateException(
+                    "JWT_SECRET is too short: HS256 needs at least 32 bytes (256 bits) after decoding. "
+                            + "Generate one with: openssl rand -base64 48");
+        }
+        this.key = Keys.hmacShaKeyFor(keyBytes);
         this.expirationMs = expirationMs;
     }
 

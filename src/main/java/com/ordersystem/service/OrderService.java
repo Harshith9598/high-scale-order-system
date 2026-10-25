@@ -9,6 +9,7 @@ import com.ordersystem.exception.InvalidOrderStateException;
 import com.ordersystem.exception.ResourceNotFoundException;
 import com.ordersystem.kafka.event.OrderCreatedEvent;
 import com.ordersystem.mapper.OrderMapper;
+import com.ordersystem.metrics.OrderMetrics;
 import com.ordersystem.outbox.OutboxService;
 import com.ordersystem.repository.OrderRepository;
 import com.ordersystem.repository.ProductRepository;
@@ -19,6 +20,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -39,6 +41,7 @@ public class OrderService {
     private final OrderMapper orderMapper;
     private final OutboxService outboxService;
     private final ObjectMapper objectMapper;
+    private final OrderMetrics orderMetrics;
 
     @Value("${app.kafka.topics.order-created}")
     private String orderCreatedTopic;
@@ -56,17 +59,24 @@ public class OrderService {
         if (correlationId == null) correlationId = UUID.randomUUID().toString();
 
         Order order = Order.builder()
-                .orderNumber("ORD-" + System.currentTimeMillis() + "-" + (int)(Math.random()*10000))
+                .orderNumber("ORD-" + Instant.now().toEpochMilli() + "-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase())
                 .user(user)
                 .status(OrderStatus.CREATED)
                 .totalAmount(BigDecimal.ZERO)
                 .correlationId(correlationId)
                 .build();
 
+        // Merge duplicate product lines so inventory is reserved once per product.
+        java.util.Map<Long, Integer> mergedQuantities = new java.util.LinkedHashMap<>();
+        for (var itemReq : request.getItems()) {
+            mergedQuantities.merge(itemReq.getProductId(), itemReq.getQuantity(), Integer::sum);
+        }
+
         BigDecimal total = BigDecimal.ZERO;
         List<OrderItem> orderItems = new ArrayList<>();
 
-        for (var itemReq : request.getItems()) {
+        for (var entry : mergedQuantities.entrySet()) {
+            var itemReq = new OrderDto.CreateOrderRequest.OrderItemRequest(entry.getKey(), entry.getValue());
             Product product = productRepository.findById(itemReq.getProductId())
                     .orElseThrow(() -> new ResourceNotFoundException("Product not found: " + itemReq.getProductId()));
 
@@ -95,6 +105,7 @@ public class OrderService {
         order.setItems(orderItems);
 
         order = orderRepository.save(order);
+        orderMetrics.orderCreated();
         log.info("Order created: id={} orderNumber={} userId={} total={} correlationId={}",
                 order.getId(), order.getOrderNumber(), userId, total, correlationId);
 
@@ -129,7 +140,7 @@ public class OrderService {
                 .orElseThrow(() -> new ResourceNotFoundException("Order not found: " + orderId));
 
         if (!isAdmin && !order.getUser().getId().equals(currentUserId)) {
-            throw new BusinessException("Access denied to order: " + orderId);
+            throw new AccessDeniedException("Access denied to order: " + orderId);
         }
 
         return orderMapper.toDtoWithItems(order);
@@ -152,7 +163,7 @@ public class OrderService {
                 .orElseThrow(() -> new ResourceNotFoundException("Order not found: " + orderId));
 
         if (!isAdmin && !order.getUser().getId().equals(currentUserId)) {
-            throw new BusinessException("Access denied to order: " + orderId);
+            throw new AccessDeniedException("Access denied to order: " + orderId);
         }
 
         if (order.getStatus() == OrderStatus.COMPLETED || order.getStatus() == OrderStatus.CANCELLED) {
@@ -182,9 +193,10 @@ public class OrderService {
                             order.getStatus(), newStatus, order.getOrderNumber()));
         }
 
+        OrderStatus previousStatus = order.getStatus();
         order.setStatus(newStatus);
         order = orderRepository.save(order);
-        log.info("Order status updated: orderNumber={} {} -> {}", order.getOrderNumber(), order.getStatus(), newStatus);
+        log.info("Order status updated: orderNumber={} {} -> {}", order.getOrderNumber(), previousStatus, newStatus);
         return order;
     }
 

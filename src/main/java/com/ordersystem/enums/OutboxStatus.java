@@ -4,5 +4,7 @@ public enum OutboxStatus {
     PENDING,
     PROCESSING,
     COMPLETED,
-    FAILED
+    FAILED,
+    /** Retries exhausted; needs manual intervention. Never polled again. */
+    DEAD
 }

@@ -8,10 +8,11 @@ import org.springframework.context.annotation.Configuration;
 
 @Slf4j
 @Configuration
-public class CacheErrorConfig {
+public class CacheErrorConfig implements org.springframework.cache.annotation.CachingConfigurer {
 
+    @Override
     @Bean
-    public CacheErrorHandler cacheErrorHandler() {
+    public CacheErrorHandler errorHandler() {
         return new CacheErrorHandler() {
             @Override
             public void handleCacheGetError(RuntimeException exception, Cache cache, Object key) {

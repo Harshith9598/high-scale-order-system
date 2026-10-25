@@ -31,12 +31,12 @@ public interface InventoryRepository extends JpaRepository<Inventory, Long> {
 
     @Modifying
     @Query("UPDATE Inventory i SET i.quantityAvailable = i.quantityAvailable + :quantity, " +
-            "i.quantityReserved = i.quantityReserved - :quantity " +
+            "i.quantityReserved = i.quantityReserved - :quantity, i.version = i.version + 1 " +
             "WHERE i.product.id = :productId AND i.quantityReserved >= :quantity")
     int releaseInventory(@Param("productId") Long productId, @Param("quantity") int quantity);
 
     @Modifying
-    @Query("UPDATE Inventory i SET i.quantityReserved = i.quantityReserved - :quantity " +
+    @Query("UPDATE Inventory i SET i.quantityReserved = i.quantityReserved - :quantity, i.version = i.version + 1 " +
             "WHERE i.product.id = :productId AND i.quantityReserved >= :quantity")
     int confirmReservation(@Param("productId") Long productId, @Param("quantity") int quantity);
 }

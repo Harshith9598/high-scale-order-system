@@ -59,3 +59,5 @@ temp/
 live-index.html
 *.bundle
 high-scale-order-system.zip
+
+.cache/
