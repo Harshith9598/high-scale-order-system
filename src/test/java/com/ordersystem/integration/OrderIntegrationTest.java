@@ -5,6 +5,9 @@ import com.ordersystem.entity.Product;
 import com.ordersystem.entity.Role;
 import com.ordersystem.entity.User;
 import com.ordersystem.enums.RoleType;
+import com.ordersystem.repository.NotificationRepository;
+import com.ordersystem.repository.OrderRepository;
+import com.ordersystem.repository.PaymentRepository;
 import com.ordersystem.repository.ProductRepository;
 import com.ordersystem.repository.RoleRepository;
 import com.ordersystem.repository.UserRepository;
@@ -86,6 +89,15 @@ public class OrderIntegrationTest {
     private InventoryRepository inventoryRepository;
 
     @Autowired
+    private OrderRepository orderRepository;
+
+    @Autowired
+    private PaymentRepository paymentRepository;
+
+    @Autowired
+    private NotificationRepository notificationRepository;
+
+    @Autowired
     private PasswordEncoder passwordEncoder;
 
     private String authToken;
@@ -93,7 +105,13 @@ public class OrderIntegrationTest {
 
     @BeforeEach
     void setUp() throws Exception {
-        // Clean
+        // Clean in FK-safe order: payments/notifications reference orders,
+        // orders reference users, and order_items reference products (no
+        // ON DELETE CASCADE on those FKs), so dependents must go first.
+        // Deleting orders cascades to order_items.
+        paymentRepository.deleteAll();
+        notificationRepository.deleteAll();
+        orderRepository.deleteAll();
         inventoryRepository.deleteAll();
         productRepository.deleteAll();
         userRepository.deleteAll();

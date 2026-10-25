@@ -105,3 +105,21 @@ scenario was executed successfully against local PostgreSQL 17; the Testcontaine
 class itself runs in CI (no Docker in the audit sandbox — it is discovered and
 attempted, failing only on "no valid Docker environment", 0 skipped).
 Unit suite is now 40 tests.
+
+
+### CI follow-up (first GitHub Actions run of this branch)
+
+The first CI run failed in the `integration-tests` job (Surefire exit 1);
+`unit-tests` including the Docker build passed. Actions logs/artifacts require
+repo auth, so the failure was reproduced locally after installing Docker in the
+sandbox. Root cause was a **test-isolation defect** (R6), not an app regression:
+`OrderIntegrationTest.setUp()` deleted products/users while `order_items` /
+`orders` rows from a previous test still referenced them (those FKs have no
+`ON DELETE CASCADE`), raising `DataIntegrityViolationException`
+(`order_items_product_id_fkey`). Fix: clean payments -> notifications -> orders
+-> inventory -> products -> users in `setUp()`. No production code changed and
+no assertion was weakened. Verified locally with Docker using the exact CI
+commands: unit `verify` 40/40, integration (`OrderIntegrationTest`,
+`ConcurrentOrderTest`, `FlywayMigrationV1ToV2Test`) 7/7, `docker build` OK —
+so the Testcontainers suites and Dockerfile are now locally verified as well,
+superseding the "not run locally" caveat above.
