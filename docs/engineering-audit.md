@@ -84,3 +84,24 @@ effect ⇒ **effectively-once business effects for recorded operations**, not en
 exactly-once. A crash between outbox-publish and marking `COMPLETED` re-publishes with a
 *stable* `eventId`, which consumers dedupe. Offsets are committed (`AckMode.RECORD`)
 only after the listener transaction commits.
+
+
+## Pre-push review addendum (second pass over this branch)
+
+A follow-up review of the branch diff found and fixed five more issues:
+
+| # | Sev | Finding | Fix |
+|---|-----|---------|-----|
+| R1 | 🔴 | Unauthenticated requests returned 403, but `OrderIntegrationTest` (and API convention) expect 401 — the CI integration job would fail. | `HttpStatusEntryPoint(UNAUTHORIZED)` in `SecurityConfig`; live-verified 401. |
+| R2 | 🟡 | Multi-instance outbox safety depended on a detached-save optimistic-lock failure as a side effect rather than an explicit claim. | Atomic conditional `claim()` UPDATE guarded by id+version+due-status; publisher skips rows it did not claim. Proven on PostgreSQL: 10 concurrent claims → 1× `UPDATE 1`, 9× `UPDATE 0`; expired `PROCESSING` leases are reclaimable. |
+| R3 | 🟡 | Compensation code caught and swallowed inventory-release failures inside the consumer transaction (rollback-only risk, leaked reservations). | Failed releases now throw, rolling back the consumer transaction for retry/DLT. |
+| R4 | 🔴 | Testcontainers `KafkaContainer` (new `org.testcontainers.kafka` class) asserts image compatibility with `apache/kafka`; tests used `apache/kafka-native:3.8.0` without `asCompatibleSubstituteFor(...)` → `IllegalStateException` before any test ran. | Tests now use `apache/kafka:3.8.0`. |
+| R5 | 🟢 | Malformed/unknown-field JSON bodies returned 500. | `HttpMessageNotReadableException` → 400 `MALFORMED_REQUEST`; live-verified. |
+
+Also added `FlywayMigrationV1ToV2Test`: populates a V1 database, proves V1 rejects a
+second consumer for the same event, upgrades to V2, and asserts data preservation,
+fan-out legality, true-duplicate rejection, and the new outbox index. The identical
+scenario was executed successfully against local PostgreSQL 17; the Testcontainers
+class itself runs in CI (no Docker in the audit sandbox — it is discovered and
+attempted, failing only on "no valid Docker environment", 0 skipped).
+Unit suite is now 40 tests.

@@ -87,10 +87,11 @@ public class PaymentConsumer {
                 // Release inventory on payment failure
                 var orderWithItems = orderRepository.findByIdWithItems(order.getId()).orElse(order);
                 for (var item : orderWithItems.getItems()) {
-                    try {
-                        inventoryService.releaseInventory(item.getProduct().getId(), item.getQuantity());
-                    } catch (Exception ex) {
-                        log.warn("Failed to release inventory on payment failure: {}", ex.getMessage());
+                    // As above: a failed release rolls back and retries
+                    // instead of leaking the reservation permanently.
+                    if (!inventoryService.releaseInventory(item.getProduct().getId(), item.getQuantity())) {
+                        throw new IllegalStateException("Release on payment failure matched no reservation for product "
+                                + item.getProduct().getId());
                     }
                 }
             }

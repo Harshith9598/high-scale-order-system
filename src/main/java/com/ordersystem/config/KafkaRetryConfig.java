@@ -28,7 +28,7 @@ import java.io.StringWriter;
  *
  * <p>Retryable failures are retried in-memory with exponential backoff
  * (1s → 2s → 4s, max 3 retries). After exhaustion the record is published to
- * {@code <topic>.DLT} (same partition) via {@link DeadLetterPublishingRecoverer}
+ * {@code <topic>.DLT} (producer-chosen partition) via {@link DeadLetterPublishingRecoverer}
  * <i>and</i> persisted to {@code failed_events} for inspection through the
  * admin API. Malformed records (deserialization errors, events without an
  * {@code eventId}) are non-retryable and go straight to the DLT.</p>

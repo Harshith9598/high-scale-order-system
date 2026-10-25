@@ -37,6 +37,7 @@ class OutboxPublisherTest {
     @BeforeEach
     void setUp() {
         lenient().when(repository.save(any(OutboxEvent.class))).thenAnswer(inv -> inv.getArgument(0));
+        lenient().when(repository.claim(any(), any(), any(Instant.class), any(Instant.class))).thenReturn(1);
         publisher = new OutboxPublisher(repository, eventProducer, mapper);
         ReflectionTestUtils.setField(publisher, "batchSize", 100);
         ReflectionTestUtils.setField(publisher, "maxRetries", 3);
@@ -114,6 +115,20 @@ class OutboxPublisherTest {
 
         verify(eventProducer, never()).publish(anyString(), anyString(), any(BaseEvent.class));
         assertEquals(OutboxStatus.FAILED, row.getStatus());
+    }
+
+    @Test
+    void losingTheClaimRaceSkipsPublish() throws Exception {
+        // Two publisher instances race: claim() is one conditional UPDATE, so
+        // the loser gets 0 and must not publish or mutate the row.
+        OutboxEvent row = pendingOrderCreated(0);
+        when(repository.findDueEvents(any(Instant.class), any(Pageable.class))).thenReturn(List.of(row));
+        when(repository.claim(any(), any(), any(Instant.class), any(Instant.class))).thenReturn(0);
+
+        publisher.publishPendingEvents();
+
+        verify(eventProducer, never()).publish(anyString(), anyString(), any(BaseEvent.class));
+        assertEquals(OutboxStatus.PENDING, row.getStatus());
     }
 
     @Test

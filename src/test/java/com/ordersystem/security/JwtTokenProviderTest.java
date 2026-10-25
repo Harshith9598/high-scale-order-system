@@ -15,6 +15,13 @@ class JwtTokenProviderTest {
     }
 
     @Test
+    void nonPositiveExpirationFailsFast() {
+        String ok = "a-plain-text-secret-that-is-long-enough!!";
+        assertThrows(IllegalStateException.class, () -> new JwtTokenProvider(ok, 0));
+        assertThrows(IllegalStateException.class, () -> new JwtTokenProvider(ok, -1));
+    }
+
+    @Test
     void weakSecretFailsFastInsteadOfBeingPadded() {
         // Regression: the old code zero-padded short secrets to 32 bytes.
         assertThrows(IllegalStateException.class, () -> new JwtTokenProvider("short", 60_000));

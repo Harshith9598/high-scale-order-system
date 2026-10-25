@@ -71,6 +71,7 @@ class InventoryConsumerTest {
         when(idempotencyService.tryMarkProcessed("evt-1", "inventory-consumer", "42")).thenReturn(true);
         when(inventoryService.reserveInventory(1L, 2)).thenReturn(true);
         when(inventoryService.reserveInventory(2L, 1)).thenReturn(false); // insufficient
+        when(inventoryService.releaseInventory(1L, 2)).thenReturn(true);
         when(orderRepository.findById(42L)).thenReturn(Optional.of(order));
 
         consumer.handleOrderCreated(event(), "order.created", 0, 1L);

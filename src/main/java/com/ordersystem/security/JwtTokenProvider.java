@@ -21,6 +21,9 @@ public class JwtTokenProvider {
 
     public JwtTokenProvider(@Value("${app.jwt.secret}") String secret,
                             @Value("${app.jwt.expiration-ms}") long expirationMs) {
+        if (expirationMs <= 0) {
+            throw new IllegalStateException("JWT_EXPIRATION_MS must be positive, got: " + expirationMs);
+        }
         if (secret == null || secret.isBlank()) {
             throw new IllegalStateException(
                     "JWT_SECRET is not set. Generate one with: openssl rand -base64 48");

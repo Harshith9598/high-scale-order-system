@@ -107,10 +107,13 @@ outboxService.saveEvent("Order", event.getOrderId().toString(), "InventoryReserv
                 // Compensate ONLY the lines this order actually reserved
                 // (releasing everything could hand other orders' reservations back).
                 for (OrderCreatedEvent.OrderItem item : reservedItems) {
-                    try {
-                        inventoryService.releaseInventory(item.getProductId(), item.getQuantity());
-                    } catch (Exception ex) {
-                        log.warn("Failed to rollback inventory for product {}: {}", item.getProductId(), ex.getMessage());
+                    // No try/catch: a failed compensation must roll back the
+                    // whole consumer transaction (which also undoes the
+                    // reservations) and be retried, not be swallowed into a
+                    // rollback-only transaction that commits half a state.
+                    if (!inventoryService.releaseInventory(item.getProductId(), item.getQuantity())) {
+                        throw new IllegalStateException("Compensation release matched no reservation for product "
+                                + item.getProductId());
                     }
                 }
 

@@ -33,10 +33,11 @@ import java.util.concurrent.TimeUnit;
  * call: each state transition is its own short repository transaction, so a
  * slow broker never holds a pooled DB connection open.</p>
  *
- * <p>Single-instance assumption: two instances polling concurrently can both
- * publish the same row (same {@code eventId} ⇒ consumers dedupe). Claim with
- * {@code SELECT … FOR UPDATE SKIP LOCKED} before running more than one
- * instance in production.</p>
+ * <p>Multiple instances may poll concurrently: {@code claim()} is a single
+ * conditional UPDATE guarded by the row version, so exactly one instance
+ * wins a given row. A crash-window duplicate is still possible in principle
+ * (publish succeeded, completion not yet recorded) — same {@code eventId},
+ * deduped by consumers.</p>
  */
 @Slf4j
 @Component
@@ -85,15 +86,25 @@ public class OutboxPublisher {
     }
 
     private void publishOne(OutboxEvent event) {
+        // Claim first, atomically. Lease: if we crash before completing, the
+        // row becomes due again once the lease in next_retry_at passes
+        // instead of being stuck in PROCESSING.
+        Instant now = Instant.now();
+        Instant leaseUntil = now.plus(processingTimeout);
+        if (outboxEventRepository.claim(event.getId(), event.getVersion(), now, leaseUntil) == 0) {
+            log.debug("Outbox event id={} already claimed by another publisher, skipping", event.getId());
+            return;
+        }
+        // Mirror the claim locally. The bulk UPDATE bumped the DB version;
+        // the completion/failure saves below happen in separate repository
+        // transactions on this detached entity, so a stale local version
+        // would fail with OptimisticLockingFailureException. (Saves also
+        // reassign the returned merged instance for the same reason.)
         event.setStatus(OutboxStatus.PROCESSING);
-        // Lease: if we crash before completing, the row becomes due again
-        // once this timestamp passes instead of being stuck in PROCESSING.
-        event.setNextRetryAt(Instant.now().plus(processingTimeout));
-        // NOTE: keep the returned (merged) instance. These saves happen in
-        // separate repository transactions on a detached entity with
-        // @Version; reusing the pre-merge instance carries a stale version
-        // and the next save fails with OptimisticLockingFailureException.
-        event = outboxEventRepository.save(event);
+        event.setNextRetryAt(leaseUntil);
+        if (event.getVersion() != null) {
+            event.setVersion(event.getVersion() + 1);
+        }
         try {
             Class<? extends BaseEvent> type = EVENT_TYPES.get(event.getEventType());
             if (type == null) {

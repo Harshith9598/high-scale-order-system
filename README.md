@@ -484,7 +484,7 @@ GET /api/failed-events/order/{orderId}
 
 ## Testing
 
-### Unit Tests (38, no Docker needed)
+### Unit Tests (40, no Docker needed)
 
 - `OrderStatusTest` - state transitions
 - `OrderServiceTest` - order + outbox in one call, duplicate-line merging, ownership (403), invalid transitions
@@ -511,10 +511,10 @@ GET /api/failed-events/order/{orderId}
 
 ```bash
 # Unit tests only (fast, no Docker)
-./mvnw test -Dtest='!OrderIntegrationTest,!ConcurrentOrderTest'
+./mvnw test -Dtest='!OrderIntegrationTest,!ConcurrentOrderTest,!FlywayMigrationV1ToV2Test'
 
 # Integration + concurrency (requires Docker for Testcontainers)
-./mvnw test -Dtest=OrderIntegrationTest,ConcurrentOrderTest
+./mvnw test -Dtest=OrderIntegrationTest,ConcurrentOrderTest,FlywayMigrationV1ToV2Test
 ```
 
 CI (`.github/workflows/ci.yml`) runs both stages and builds the Docker image.
@@ -751,7 +751,7 @@ See `docs/` for detailed reasoning.
 | Order stays `CREATED` | Outbox publisher logs errors, or Kafka is down | `select * from outbox_events where status != 'COMPLETED'`; check `docker compose logs app | grep Outbox` |
 | Event in `failed_events` / on a `.DLT` topic | Poison/malformed record or repeated business failure | `GET /api/failed-events` (ADMIN) for the root cause; fix and republish the payload manually |
 | `docker compose` app unhealthy | Postgres/Kafka still starting | Health checks gate startup; `docker compose ps` and wait ~60s on first run |
-| Testcontainers tests fail locally | Docker daemon not running | Start Docker, or run only `./mvnw test -Dtest='!OrderIntegrationTest,!ConcurrentOrderTest'` |
+| Testcontainers tests fail locally | Docker daemon not running | Start Docker, or run only `./mvnw test -Dtest='!OrderIntegrationTest,!ConcurrentOrderTest,!FlywayMigrationV1ToV2Test'` |
 
 ## Verification status (2026-10-25 audit)
 

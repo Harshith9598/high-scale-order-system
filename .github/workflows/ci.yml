@@ -19,7 +19,7 @@ jobs:
       # Unit tests only: Testcontainers suites are excluded by name and run in
       # the integration job, where Docker is available.
       - name: Compile + unit tests
-        run: ./mvnw -B -ntp verify -Dtest='!OrderIntegrationTest,!ConcurrentOrderTest' -Dsurefire.useFile=true
+        run: ./mvnw -B -ntp verify -Dtest='!OrderIntegrationTest,!ConcurrentOrderTest,!FlywayMigrationV1ToV2Test' -Dsurefire.useFile=true
       - name: Docker build
         run: docker build -t high-scale-order-system:ci .
 
@@ -34,7 +34,7 @@ jobs:
           distribution: 'temurin'
           cache: maven
       - name: Testcontainers integration + concurrency tests
-        run: ./mvnw -B -ntp test -Dtest=OrderIntegrationTest,ConcurrentOrderTest -Dsurefire.useFile=true
+        run: ./mvnw -B -ntp test -Dtest=OrderIntegrationTest,ConcurrentOrderTest,FlywayMigrationV1ToV2Test -Dsurefire.useFile=true
       - name: Upload surefire reports on failure
         if: failure()
         uses: actions/upload-artifact@v4
