@@ -22,7 +22,7 @@
         <springdoc.version>2.6.0</springdoc.version>
         <jjwt.version>0.12.6</jjwt.version>
         <testcontainers.version>1.19.8</testcontainers.version>
-        <mapstruct.version>1.5.5.Final</mapstruct.version>
+        <mapstruct.version>1.6.3</mapstruct.version>
         <lombok.version>1.18.32</lombok.version>
     </properties>
 
