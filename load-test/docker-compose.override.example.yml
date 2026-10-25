@@ -1,0 +1,15 @@
+# Optional local overrides for load-test runs (EXAMPLE — not active).
+# Copy to the REPO ROOT as docker-compose.override.yml to activate
+# (`docker compose` picks it up automatically) and DELETE it afterwards.
+# Never commit the active override.
+#
+# Why: defaults intentionally randomize payment failures (5%) and publish
+# outbox events every 5s — both dominate "completion" measurements. For a
+# cleaner end-to-end benchmark, pin them and record that you did (run.sh
+# metadata + report). Defaults remain untouched for ordinary use.
+services:
+  app:
+    environment:
+      APP_PAYMENT_FAILURE_RATE: "0"          # deterministic payment success
+      APP_OUTBOX_POLLING_INTERVAL_MS: "500"  # tighter e2e latency floor
+      JAVA_TOOL_OPTIONS: "-Xmx768m"          # record any heap cap you set

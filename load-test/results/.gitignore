@@ -1,0 +1,4 @@
+# Generated load-test results are never committed (can be large, machine-specific).
+*
+!.gitignore
+!.gitkeep

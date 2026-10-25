@@ -64,7 +64,9 @@ services:
     volumes:
       - kafka_data:/var/lib/kraft-combined-logs
     healthcheck:
-      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list"]
+      # apache/kafka-native ships no kafka-*.sh scripts (native binary), so
+      # probe the broker listener over TCP instead.
+      test: ["CMD-SHELL", "nc -z localhost 9092"]
       interval: 15s
       timeout: 10s
       retries: 5
