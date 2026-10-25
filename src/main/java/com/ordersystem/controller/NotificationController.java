@@ -31,7 +31,7 @@ public class NotificationController {
             @PageableDefault(size = 20) Pageable pageable,
             Authentication authentication) {
         User user = userRepository.findByUsername(authentication.getName())
-                .orElseThrow(() -> new RuntimeException("User not found"));
+                .orElseThrow(() -> new com.ordersystem.exception.ResourceNotFoundException("Authenticated user not found"));
         Page<NotificationDto> notifications = notificationService.getUserNotifications(user.getId(), pageable);
         return ResponseEntity.ok(notifications);
     }
@@ -40,7 +40,7 @@ public class NotificationController {
     @GetMapping("/unread-count")
     public ResponseEntity<Long> getUnreadCount(Authentication authentication) {
         User user = userRepository.findByUsername(authentication.getName())
-                .orElseThrow(() -> new RuntimeException("User not found"));
+                .orElseThrow(() -> new com.ordersystem.exception.ResourceNotFoundException("Authenticated user not found"));
         long count = notificationService.getUnreadCount(user.getId());
         return ResponseEntity.ok(count);
     }

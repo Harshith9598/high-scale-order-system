@@ -5,6 +5,9 @@ import com.ordersystem.entity.Product;
 import com.ordersystem.entity.Role;
 import com.ordersystem.entity.User;
 import com.ordersystem.enums.RoleType;
+import com.ordersystem.repository.NotificationRepository;
+import com.ordersystem.repository.OrderRepository;
+import com.ordersystem.repository.PaymentRepository;
 import com.ordersystem.repository.ProductRepository;
 import com.ordersystem.repository.RoleRepository;
 import com.ordersystem.repository.UserRepository;
@@ -43,7 +46,7 @@ public class OrderIntegrationTest {
     static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:15-alpine");
 
     @Container
-    static KafkaContainer kafka = new KafkaContainer(DockerImageName.parse("apache/kafka-native:3.8.0"));
+    static KafkaContainer kafka = new KafkaContainer(DockerImageName.parse("apache/kafka:3.8.0"));
 
     @Container
     static GenericContainer<?> redis = new GenericContainer<>(DockerImageName.parse("redis:7-alpine"))
@@ -55,6 +58,7 @@ public class OrderIntegrationTest {
         registry.add("spring.datasource.username", postgres::getUsername);
         registry.add("spring.datasource.password", postgres::getPassword);
         registry.add("spring.kafka.bootstrap-servers", kafka::getBootstrapServers);
+        registry.add("app.jwt.secret", () -> "dGVzdC1vbmx5LXNlY3JldC1mb3ItaW50ZWdyYXRpb24tdGVzdHM=");
         registry.add("spring.data.redis.host", redis::getHost);
         registry.add("spring.data.redis.port", () -> redis.getMappedPort(6379).toString());
         registry.add("app.kafka.topics.order-created", () -> "order.created");
@@ -85,6 +89,15 @@ public class OrderIntegrationTest {
     private InventoryRepository inventoryRepository;
 
     @Autowired
+    private OrderRepository orderRepository;
+
+    @Autowired
+    private PaymentRepository paymentRepository;
+
+    @Autowired
+    private NotificationRepository notificationRepository;
+
+    @Autowired
     private PasswordEncoder passwordEncoder;
 
     private String authToken;
@@ -92,7 +105,13 @@ public class OrderIntegrationTest {
 
     @BeforeEach
     void setUp() throws Exception {
-        // Clean
+        // Clean in FK-safe order: payments/notifications reference orders,
+        // orders reference users, and order_items reference products (no
+        // ON DELETE CASCADE on those FKs), so dependents must go first.
+        // Deleting orders cascades to order_items.
+        paymentRepository.deleteAll();
+        notificationRepository.deleteAll();
+        orderRepository.deleteAll();
         inventoryRepository.deleteAll();
         productRepository.deleteAll();
         userRepository.deleteAll();
@@ -190,6 +209,14 @@ public class OrderIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json))
                 .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void testUnauthenticatedOrderCreationRejected() throws Exception {
+        mockMvc.perform(post("/api/orders")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"items\":[{\"productId\":1,\"quantity\":1}]}"))
+                .andExpect(status().isUnauthorized());
     }
 
     @Test

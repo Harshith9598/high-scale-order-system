@@ -95,6 +95,18 @@ public class PaymentService {
         return toDto(payment);
     }
 
+    /** Ownership-checked variant used by the REST API (prevents payment IDOR). */
+    @Transactional(readOnly = true)
+    public PaymentDto getPaymentByOrderId(Long orderId, Long currentUserId, boolean isAdmin) {
+        Payment payment = paymentRepository.findByOrderId(orderId)
+                .orElseThrow(() -> new ResourceNotFoundException("Payment not found for order: " + orderId));
+        if (!isAdmin && !payment.getOrder().getUser().getId().equals(currentUserId)) {
+            throw new org.springframework.security.access.AccessDeniedException(
+                    "Access denied to payment for order: " + orderId);
+        }
+        return toDto(payment);
+    }
+
     @Transactional(readOnly = true)
     public PaymentDto getPaymentByOrderNumber(String orderNumber) {
         Payment payment = paymentRepository.findByOrderOrderNumber(orderNumber)

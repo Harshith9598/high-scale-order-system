@@ -10,6 +10,14 @@ import org.springframework.stereotype.Component;
 
 import java.util.concurrent.CompletableFuture;
 
+/**
+ * Kafka publisher used exclusively by the outbox publisher. Business code
+ * must not call this directly inside a DB transaction: write an outbox row
+ * instead ({@code OutboxService.saveEvent}) so the state change and the event
+ * commit atomically and the {@code eventId} stays stable across republishes.
+ * (The former publishSync/publishObject helpers were removed for exactly this
+ * reason -- they invited dual-writes.)
+ */
 @Slf4j
 @Component
 @RequiredArgsConstructor
@@ -41,37 +49,5 @@ public class EventProducer {
         });
 
         return future;
-    }
-
-    public CompletableFuture<SendResult<String, Object>> publishObject(String topic, String key, Object payload) {
-        log.info("Publishing object payload to topic={} key={}", topic, key);
-        CompletableFuture<SendResult<String, Object>> future = kafkaTemplate.send(topic, key, payload);
-        future.whenComplete((result, ex) -> {
-            if (ex != null) {
-                log.error("Failed to publish object to topic={}: {}", topic, ex.getMessage(), ex);
-            } else {
-                log.info("Object published to topic={} partition={} offset={}",
-                        topic,
-                        result.getRecordMetadata().partition(),
-                        result.getRecordMetadata().offset());
-            }
-        });
-        return future;
-    }
-
-    public <T extends BaseEvent> void publishSync(String topic, String key, T event) {
-        try {
-            publish(topic, key, event).get();
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to publish event synchronously: " + e.getMessage(), e);
-        }
-    }
-
-    public void publishObjectSync(String topic, String key, Object payload) {
-        try {
-            publishObject(topic, key, payload).get();
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to publish object synchronously: " + e.getMessage(), e);
-        }
     }
 }

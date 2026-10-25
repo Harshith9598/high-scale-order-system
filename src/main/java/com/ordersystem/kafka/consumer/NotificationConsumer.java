@@ -13,7 +13,6 @@ import com.ordersystem.service.NotificationService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.kafka.annotation.KafkaListener;
-import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.kafka.support.KafkaHeaders;
 import org.springframework.messaging.handler.annotation.Header;
 import org.springframework.messaging.handler.annotation.Payload;
@@ -35,14 +34,12 @@ public class NotificationConsumer {
     @KafkaListener(topics = "${app.kafka.topics.order-completed}", groupId = "notification-group", containerFactory = "kafkaListenerContainerFactory")
     @Transactional
     public void handleOrderCompleted(@Payload OrderCompletedEvent event,
-                                     @Header(KafkaHeaders.RECEIVED_TOPIC) String topic,
-                                     Acknowledgment ack) {
+                                     @Header(KafkaHeaders.RECEIVED_TOPIC) String topic) {
         String eventId = event.getEventId();
         log.info("NotificationConsumer received OrderCompleted: eventId={} orderId={}", eventId, event.getOrderId());
 
         try {
             if (!idempotencyService.tryMarkProcessed(eventId, CONSUMER_NAME, event.getOrderId().toString())) {
-                ack.acknowledge();
                 return;
             }
 
@@ -59,8 +56,6 @@ public class NotificationConsumer {
                         event.getCorrelationId()
                 );
             }
-
-            ack.acknowledge();
         } catch (Exception e) {
             log.error("Error processing notification for order completed: {}", e.getMessage(), e);
             throw new RuntimeException(e);
@@ -69,13 +64,12 @@ public class NotificationConsumer {
 
     @KafkaListener(topics = "${app.kafka.topics.payment-failed}", groupId = "notification-group", containerFactory = "kafkaListenerContainerFactory")
     @Transactional
-    public void handlePaymentFailed(@Payload PaymentProcessedEvent event, Acknowledgment ack) {
+    public void handlePaymentFailed(@Payload PaymentProcessedEvent event) {
         String eventId = event.getEventId();
         log.info("NotificationConsumer received PaymentFailed: eventId={} orderId={}", eventId, event.getOrderId());
 
         try {
             if (!idempotencyService.tryMarkProcessed(eventId, CONSUMER_NAME + "-payment-failed", event.getOrderId().toString())) {
-                ack.acknowledge();
                 return;
             }
 
@@ -92,8 +86,6 @@ public class NotificationConsumer {
                         event.getCorrelationId()
                 );
             }
-
-            ack.acknowledge();
         } catch (Exception e) {
             log.error("Error processing payment failed notification: {}", e.getMessage(), e);
             throw new RuntimeException(e);
@@ -102,13 +94,12 @@ public class NotificationConsumer {
 
     @KafkaListener(topics = "${app.kafka.topics.inventory-failed}", groupId = "notification-group", containerFactory = "kafkaListenerContainerFactory")
     @Transactional
-    public void handleInventoryFailed(@Payload InventoryReservedEvent event, Acknowledgment ack) {
+    public void handleInventoryFailed(@Payload InventoryReservedEvent event) {
         String eventId = event.getEventId();
         log.info("NotificationConsumer received InventoryFailed: eventId={} orderId={}", eventId, event.getOrderId());
 
         try {
             if (!idempotencyService.tryMarkProcessed(eventId, CONSUMER_NAME + "-inventory-failed", event.getOrderId().toString())) {
-                ack.acknowledge();
                 return;
             }
 
@@ -125,8 +116,6 @@ public class NotificationConsumer {
                         event.getCorrelationId()
                 );
             }
-
-            ack.acknowledge();
         } catch (Exception e) {
             log.error("Error processing inventory failed notification: {}", e.getMessage(), e);
             throw new RuntimeException(e);

@@ -6,10 +6,15 @@ import lombok.*;
 import java.time.Instant;
 
 @Entity
-@Table(name = "idempotency_records", indexes = {
-        @Index(name = "idx_idempotency_event_id", columnList = "event_id", unique = true),
-        @Index(name = "idx_idempotency_created_at", columnList = "created_at")
-})
+@Table(name = "idempotency_records",
+        // Idempotency is scoped per consumer: the same event may legitimately be
+        // processed once by EACH consumer group (fan-out). See Flyway V2.
+        uniqueConstraints = @UniqueConstraint(name = "idx_idempotency_event_consumer",
+                columnNames = {"event_id", "consumer_name"}),
+        indexes = {
+                @Index(name = "idx_idempotency_event_id", columnList = "event_id"),
+                @Index(name = "idx_idempotency_created_at", columnList = "created_at")
+        })
 @Getter
 @Setter
 @NoArgsConstructor
@@ -20,7 +25,7 @@ public class IdempotencyRecord {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "event_id", nullable = false, unique = true, length = 100)
+    @Column(name = "event_id", nullable = false, length = 100)
     private String eventId;
 
     @Column(name = "consumer_name", nullable = false, length = 100)

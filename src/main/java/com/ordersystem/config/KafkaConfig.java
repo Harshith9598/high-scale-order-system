@@ -77,7 +77,9 @@ public class KafkaConfig {
         mapper.registerModule(new JavaTimeModule());
 
         DefaultKafkaProducerFactory<String, Object> factory = new DefaultKafkaProducerFactory<>(config);
-        factory.setValueSerializer(new JsonSerializer<>(mapper));
+        JsonSerializer<Object> serializer = new JsonSerializer<>(mapper);
+        serializer.setAddTypeInfo(true); // __TypeId__ header: consumers deserialize to the concrete event class
+        factory.setValueSerializer(serializer);
         return factory;
     }
 
@@ -92,25 +94,32 @@ public class KafkaConfig {
         config.put(org.apache.kafka.clients.consumer.ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
         config.put(org.apache.kafka.clients.consumer.ConsumerConfig.GROUP_ID_CONFIG, "order-platform-group");
         config.put(org.apache.kafka.clients.consumer.ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
-        config.put(org.apache.kafka.clients.consumer.ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
-        config.put(org.apache.kafka.clients.consumer.ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, JsonDeserializer.class);
-        config.put(JsonDeserializer.TRUSTED_PACKAGES, "com.ordersystem.kafka.event");
-        config.put(JsonDeserializer.VALUE_DEFAULT_TYPE, "com.ordersystem.kafka.event.OrderCreatedEvent");
         config.put(org.apache.kafka.clients.consumer.ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);
         config.put(org.apache.kafka.clients.consumer.ConsumerConfig.MAX_POLL_RECORDS_CONFIG, 50);
 
         ObjectMapper mapper = new ObjectMapper();
         mapper.registerModule(new JavaTimeModule());
 
-        return new DefaultKafkaConsumerFactory<>(config, new StringDeserializer(),
-                new JsonDeserializer<>(Object.class, mapper, false));
+        // Honor the producer's __TypeId__ header so each @Payload arrives as its
+        // concrete event class. Previously this was JsonDeserializer(Object,
+        // useHeaders=false) with a single VALUE_DEFAULT_TYPE for every topic,
+        // so listeners received Maps instead of events.
+        JsonDeserializer<Object> deserializer = new JsonDeserializer<>(Object.class, mapper, true);
+        deserializer.addTrustedPackages("com.ordersystem.kafka.event");
+
+        return new DefaultKafkaConsumerFactory<>(config, new StringDeserializer(), deserializer);
     }
 
     @Bean
-    public ConcurrentKafkaListenerContainerFactory<String, Object> kafkaListenerContainerFactory() {
+    public ConcurrentKafkaListenerContainerFactory<String, Object> kafkaListenerContainerFactory(
+            org.springframework.kafka.listener.CommonErrorHandler kafkaErrorHandler) {
         ConcurrentKafkaListenerContainerFactory<String, Object> factory = new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(consumerFactory());
-        factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.MANUAL_IMMEDIATE);
+        // RECORD: the container commits the offset after the listener returns,
+        // i.e. after its DB transaction has committed. (The old MANUAL_IMMEDIATE
+        // ack() inside @Transactional listeners committed offsets before the DB.)
+        factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.RECORD);
+        factory.setCommonErrorHandler(kafkaErrorHandler);
         factory.setConcurrency(3);
         return factory;
     }
@@ -170,5 +179,22 @@ public class KafkaConfig {
     @Bean
     public NewTopic notificationCreatedDltTopic() {
         return TopicBuilder.name(notificationCreatedDlt).partitions(1).replicas(1).build();
+    }
+
+    // DLT topics for the remaining consumed topics (error handler routes
+    // <topic>.DLT; replicas=1 matches the single-broker local setup).
+    @Bean
+    public NewTopic inventoryFailedDltTopic() {
+        return TopicBuilder.name(inventoryFailedTopic + ".DLT").partitions(1).replicas(1).build();
+    }
+
+    @Bean
+    public NewTopic paymentFailedDltTopic() {
+        return TopicBuilder.name(paymentFailedTopic + ".DLT").partitions(1).replicas(1).build();
+    }
+
+    @Bean
+    public NewTopic orderCompletedDltTopic() {
+        return TopicBuilder.name(orderCompletedTopic + ".DLT").partitions(1).replicas(1).build();
     }
 }

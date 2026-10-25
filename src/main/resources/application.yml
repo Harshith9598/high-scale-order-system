@@ -1,9 +1,12 @@
 server:
   port: 8080
+  shutdown: graceful
 
 spring:
   application:
     name: order-platform
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
 
   datasource:
     url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/orderdb}
@@ -33,6 +36,10 @@ spring:
     baseline-on-migrate: true
 
   data:
+    web:
+      pageable:
+        max-page-size: 100
+        default-page-size: 20
     redis:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
@@ -75,11 +82,16 @@ spring:
 
 app:
   jwt:
-    secret: ${JWT_SECRET:5367566B59703373367639792F423F4528482B4D6251655468576D5A71347437}
+    # No default: the app must not start with a signing key that is public in
+    # git history. Generate one: openssl rand -base64 48  (docker-compose
+    # supplies a clearly-labelled dev-only value for local use).
+    secret: ${JWT_SECRET}
     expiration-ms: ${JWT_EXPIRATION_MS:86400000}
   outbox:
     polling-interval-ms: 5000
     batch-size: 100
+    max-retries: 10
+    processing-timeout: PT5M
   kafka:
     topics:
       order-created: order.created
@@ -101,11 +113,14 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics,prometheus,beans,env,caches
+        # Never expose env/beans over HTTP: they leak configuration and secrets.
+        include: health,info,metrics,prometheus
   endpoint:
     health:
-      show-details: always
-      show-components: always
+      show-details: when_authorized
+      show-components: when_authorized
+      probes:
+        enabled: true
   metrics:
     tags:
       application: ${spring.application.name}
@@ -124,7 +139,7 @@ springdoc:
 
 logging:
   level:
-    com.ordersystem: DEBUG
+    com.ordersystem: INFO
     org.springframework.kafka: INFO
     org.hibernate.SQL: WARN
   pattern:

@@ -35,7 +35,7 @@ public class OrderController {
             @Valid @RequestBody OrderDto.CreateOrderRequest request,
             Authentication authentication) {
         User user = userRepository.findByUsername(authentication.getName())
-                .orElseThrow(() -> new RuntimeException("User not found"));
+                .orElseThrow(() -> new com.ordersystem.exception.ResourceNotFoundException("Authenticated user not found"));
         OrderDto order = orderService.createOrder(user.getId(), request);
         return ResponseEntity.status(HttpStatus.CREATED).body(order);
     }
@@ -44,7 +44,7 @@ public class OrderController {
     @GetMapping("/{id}")
     public ResponseEntity<OrderDto> getOrder(@PathVariable Long id, Authentication authentication) {
         User user = userRepository.findByUsername(authentication.getName())
-                .orElseThrow(() -> new RuntimeException("User not found"));
+                .orElseThrow(() -> new com.ordersystem.exception.ResourceNotFoundException("Authenticated user not found"));
         boolean isAdmin = authentication.getAuthorities().contains(new SimpleGrantedAuthority("ROLE_ADMIN"));
         OrderDto order = orderService.getOrder(id, user.getId(), isAdmin);
         return ResponseEntity.ok(order);
@@ -56,7 +56,7 @@ public class OrderController {
             @PageableDefault(size = 20) Pageable pageable,
             Authentication authentication) {
         User user = userRepository.findByUsername(authentication.getName())
-                .orElseThrow(() -> new RuntimeException("User not found"));
+                .orElseThrow(() -> new com.ordersystem.exception.ResourceNotFoundException("Authenticated user not found"));
         boolean isAdmin = authentication.getAuthorities().contains(new SimpleGrantedAuthority("ROLE_ADMIN"));
 
         Page<OrderDto> orders;
@@ -72,7 +72,7 @@ public class OrderController {
     @PostMapping("/{id}/cancel")
     public ResponseEntity<OrderDto> cancelOrder(@PathVariable Long id, Authentication authentication) {
         User user = userRepository.findByUsername(authentication.getName())
-                .orElseThrow(() -> new RuntimeException("User not found"));
+                .orElseThrow(() -> new com.ordersystem.exception.ResourceNotFoundException("Authenticated user not found"));
         boolean isAdmin = authentication.getAuthorities().contains(new SimpleGrantedAuthority("ROLE_ADMIN"));
         OrderDto cancelled = orderService.cancelOrder(id, user.getId(), isAdmin);
         return ResponseEntity.ok(cancelled);

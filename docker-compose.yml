@@ -1,19 +1,21 @@
-version: '3.8'
-
+# Local development stack only. All credentials below are dev defaults that can
+# be overridden from the shell / a local .env file, e.g.:
+#   JWT_SECRET=$(openssl rand -base64 48) docker compose up -d
+# Never reuse these defaults outside your machine.
 services:
   postgres:
     image: postgres:15-alpine
     container_name: order-postgres
     environment:
-      POSTGRES_DB: orderdb
-      POSTGRES_USER: orderuser
-      POSTGRES_PASSWORD: orderpass
+      POSTGRES_DB: ${POSTGRES_DB:-orderdb}
+      POSTGRES_USER: ${POSTGRES_USER:-orderuser}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-orderpass}
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U orderuser -d orderdb"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-orderuser} -d ${POSTGRES_DB:-orderdb}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -40,13 +42,20 @@ services:
     image: apache/kafka-native:3.8.0
     container_name: order-kafka
     ports:
-      - "9092:9092"
+      - "9092:9092"   # host listener (tools running on your machine)
     environment:
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
-      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
-      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
+      # Two PLAINTEXT listeners: the app container must be told to reach the
+      # broker as "kafka:29092" while host tools use "localhost:9092".
+      # Advertising only localhost (the old setup) breaks in-container clients:
+      # bootstrap succeeds, then metadata redirects them to localhost.
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:29092,EXTERNAL://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:29092,EXTERNAL://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
@@ -75,15 +84,17 @@ services:
       kafka:
         condition: service_healthy
     environment:
-      DATABASE_URL: jdbc:postgresql://postgres:5432/orderdb
-      DATABASE_USERNAME: orderuser
-      DATABASE_PASSWORD: orderpass
+      DATABASE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-orderdb}
+      DATABASE_USERNAME: ${POSTGRES_USER:-orderuser}
+      DATABASE_PASSWORD: ${POSTGRES_PASSWORD:-orderpass}
       REDIS_HOST: redis
       REDIS_PORT: 6379
-      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
-      JWT_SECRET: 5367566B59703373367639792F423F4528482B4D6251655468576D5A71347437
-      JWT_EXPIRATION_MS: 86400000
-      SPRING_PROFILES_ACTIVE: docker
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      # Dev-only default (Base64, 32 bytes) so `docker compose up` works out of
+      # the box. Override with a real secret for anything beyond localhost:
+      #   JWT_SECRET=$(openssl rand -base64 48) docker compose up -d
+      JWT_SECRET: ${JWT_SECRET:-ZGV2LW9ubHktc2VjcmV0LWRvLW5vdC11c2UtaW4tcHJvZC0xMjM0NTY3ODkwYQ==}
+      JWT_EXPIRATION_MS: ${JWT_EXPIRATION_MS:-86400000}
     ports:
       - "8080:8080"
     networks:

@@ -16,6 +16,8 @@ import java.util.List;
 @Slf4j
 @Configuration
 @RequiredArgsConstructor
+@org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
+        name = "app.seed-data.enabled", havingValue = "true", matchIfMissing = true)
 public class DataInitializer {
 
     private final ProductRepository productRepository;
@@ -48,7 +50,7 @@ public class DataInitializer {
 
             List<Inventory> inventories = products.stream().map(p -> Inventory.builder()
                     .product(p)
-                    .quantityAvailable(100 + (int)(Math.random() * 200))
+                    .quantityAvailable(100)
                     .quantityReserved(0)
                     .lowStockThreshold(10)
                     .build()).toList();
